@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi Bola Eksponensial - Lubang Bergerak</title>
+</head>
+<body style="margin: 0; padding: 0; background: black; display: flex; justify-content: center; align-items: center; height: 100vh;">
+    <canvas id="gameCanvas" width="600" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Konstanta
+        const GRAVITY = 0.08;
+        const BOUNCE_DAMPING = 0.95;
+        const BALL_RADIUS = 8;
+        const BOX_HEIGHT = 400;
+        const HOLE_WIDTH = canvas.width / 3;
+        const HOLE_SPEED = 0.3;
+        
+        // Variabel game
+        let balls = [];
+        let exitCount = 0;
+        let throughHoleCount = 0;
+        let totalGenerated = 1; // Total bola yang pernah dibuat
+        let frameCount = 0;
+        let holePosition = 0;
+        let holeDirection = 1;
+        let gameStarted = false;
+        
+        // Class Ball
+        class Ball {
+            constructor(x, y, isInitial = false) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = Math.random() * 1 + 0.5;
+                this.radius = BALL_RADIUS;
+                this.color = isInitial ? '#FF0000' : this.getRandomColor(); // Bola pertama merah
+                this.throughHole = false;
+                this.alpha = 1.0;
+                this.hasSpawned = false; // Flag untuk mencegah spawn duplikat
+            }
+            
+            getRandomColor() {
+                const colors = [
+                    '#FF4500', '#FFA500', '#FFD700', '#FFFF00',
+                    '#ADFF2F', '#00FF00', '#00FF7F', '#00FFFF', '#0080FF',
+                    '#0000FF', '#4169E1', '#8A2BE2', '#9400D3', '#FF00FF',
+                    '#FF1493', '#FF69B4', '#FFB6C1', '#FFC0CB',
+                    '#87CEEB', '#87CEFA', '#00CED1', '#20B2AA',
+                    '#32CD32', '#98FB98', '#90EE90', '#F0E68C',
+                    '#F4A460', '#CD853F', '#D2691E', '#A0522D'
+                ];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+            
+            update() {
+                // Gravitasi
+                if (this.throughHole) {
+                    this.vy += GRAVITY * 1.5;
+                } else {
+                    this.vy += GRAVITY;
+                }
+                
+                // Update posisi
+                this.y += this.vy;
+                this.x += this.vx;
+                
+                // Pantulan dinding atas
+                if (this.y - this.radius <= 0 && !this.throughHole) {
+                    this.vy *= -BOUNCE_DAMPING;
+                    this.y = this.radius;
+                }
+                
+                // Pantulan dinding samping
+                if (this.x - this.radius <= 0 && !this.throughHole) {
+                    this.vx *= -BOUNCE_DAMPING;
+                    this.x = this.radius;
+                } else if (this.x + this.radius >= canvas.width && !this.throughHole) {
+                    this.vx *= -BOUNCE_DAMPING;
+                    this.x = canvas.width - this.radius;
+                }
+                
+                // Cek pantulan dinding bawah dan lubang bergerak
+                if (this.y + this.radius >= BOX_HEIGHT && !this.throughHole) {
+                    const currentHoleStart = holePosition;
+                    const currentHoleEnd = holePosition + HOLE_WIDTH;
+                    
+                    // Cek apakah bola berada di area lubang
+                    if (this.x >= currentHoleStart && this.x <= currentHoleEnd) {
+                        // Bola jatuh melalui lubang
+                        this.throughHole = true;
+                        throughHoleCount++;
+                        this.vy = Math.max(this.vy, 2);
+                        
+                        // Spawn 2 bola baru jika belum pernah spawn
+                        if (!this.hasSpawned) {
+                            this.hasSpawned = true;
+                            this.spawnNewBalls();
+                        }
+                    } else {
+                        // Pantulan di dinding bawah
+                        this.vy *= -BOUNCE_DAMPING;
+                        this.y = BOX_HEIGHT - this.radius;
+                    }
+                }
+                
+                // Untuk bola yang sudah melewati lubang, buat mereka fade out
+                if (this.throughHole) {
+                    this.alpha -= 0.015;
+                    if (this.y > BOX_HEIGHT + 150) {
+                        this.alpha -= 0.03;
+                    }
+                }
+                
+                // Cek apakah bola sudah keluar dari layar atau fade out
+                if (this.y - this.radius > canvas.height + 100 || this.alpha <= 0) {
+                    return false;
+                }
+                
+                return true;
+            }
+            
+            spawnNewBalls() {
+                // Spawn 2 bola baru di posisi random
+                for (let i = 0; i < 2; i++) {
+                    const randomX = Math.random() * (canvas.width - 2 * BALL_RADIUS) + BALL_RADIUS;
+                    const spawnY = 30;
+                    balls.push(new Ball(randomX, spawnY, false));
+                    totalGenerated++;
+                }
+            }
+            
+            draw() {
+                // Set transparansi
+                const previousAlpha = ctx.globalAlpha;
+                ctx.globalAlpha = Math.max(0, this.alpha);
+                
+                // Gambar bola
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Gambar efek trail untuk bola yang jatuh melalui lubang
+                if (this.throughHole && this.alpha > 0.5) {
+                    ctx.globalAlpha = Math.max(0, this.alpha * 0.4);
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y - 20, this.radius * 0.7, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.globalAlpha = Math.max(0, this.alpha * 0.2);
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y - 35, this.radius * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Reset transparansi
+                ctx.globalAlpha = previousAlpha;
+            }
+        }
+        
+        // Update posisi lubang
+        function updateHole() {
+            holePosition += HOLE_SPEED * holeDirection;
+            
+            if (holePosition <= 0) {
+                holePosition = 0;
+                holeDirection = 1;
+            } else if (holePosition + HOLE_WIDTH >= canvas.width) {
+                holePosition = canvas.width - HOLE_WIDTH;
+                holeDirection = -1;
+            }
+        }
+        
+        // Inisialisasi game dengan 1 bola merah
+        function initializeGame() {
+            if (!gameStarted) {
+                const centerX = canvas.width / 2;
+                const startY = 30;
+                balls.push(new Ball(centerX, startY, true)); // Bola pertama merah
+                gameStarted = true;
+            }
+        }
+        
+        // Gambar kotak dengan lubang bergerak
+        function drawBox() {
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            
+            // Dinding kiri
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, BOX_HEIGHT);
+            ctx.stroke();
+            
+            // Dinding kanan  
+            ctx.beginPath();
+            ctx.moveTo(canvas.width, 0);
+            ctx.lineTo(canvas.width, BOX_HEIGHT);
+            ctx.stroke();
+            
+            // Dinding atas
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(canvas.width, 0);
+            ctx.stroke();
+            
+            const currentHoleStart = holePosition;
+            const currentHoleEnd = holePosition + HOLE_WIDTH;
+            
+            // Dinding bawah - bagian kiri (sebelum lubang)
+            if (currentHoleStart > 0) {
+                ctx.beginPath();
+                ctx.moveTo(0, BOX_HEIGHT);
+                ctx.lineTo(currentHoleStart, BOX_HEIGHT);
+                ctx.stroke();
+            }
+            
+            // Dinding bawah - bagian kanan (setelah lubang)
+            if (currentHoleEnd < canvas.width) {
+                ctx.beginPath();
+                ctx.moveTo(currentHoleEnd, BOX_HEIGHT);
+                ctx.lineTo(canvas.width, BOX_HEIGHT);
+                ctx.stroke();
+            }
+        }
+        
+        // Loop animasi
+        function animate() {
+            frameCount++;
+            
+            // Clear canvas
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Inisialisasi game
+            initializeGame();
+            
+            // Update posisi lubang
+            updateHole();
+            
+            // Gambar kotak dengan lubang bergerak
+            drawBox();
+            
+            // Update dan gambar bola
+            for (let i = balls.length - 1; i >= 0; i--) {
+                const ball = balls[i];
+                
+                if (!ball.update()) {
+                    balls.splice(i, 1);
+                    exitCount++;
+                } else {
+                    ball.draw();
+                }
+            }
+            
+            // Tampilkan info
+            ctx.fillStyle = 'white';
+            ctx.font = '16px Arial';
+            ctx.fillText('Bola aktif: ' + balls.length, 10, 25);
+            ctx.fillText('Total bola dibuat: ' + totalGenerated, 10, 45);
+            ctx.fillText('Jatuh melalui lubang: ' + throughHoleCount, 10, 65);
+            ctx.fillText('Keluar layar: ' + exitCount, 10, 85);
+            
+            // Tampilkan posisi lubang
+            ctx.fillStyle = '#FFFF00';
+            ctx.fillText('Posisi Lubang: ' + Math.round(holePosition) + ' - ' + Math.round(holePosition + HOLE_WIDTH), 10, 110);
+            
+            // Instruksi
+            ctx.fillStyle = '#AAAAAA';
+            ctx.font = '12px Arial';
+            ctx.fillText('Mulai dengan 1 bola merah', 10, canvas.height - 55);
+            ctx.fillText('Setiap bola yang jatuh ke lubang akan spawn 2 bola baru', 10, canvas.height - 40);
+            ctx.fillText('Pertumbuhan eksponensial: 1 → 2 → 4 → 8 → 16 → ...', 10, canvas.height - 25);
+            ctx.fillText('Lubang bergerak kiri-kanan otomatis', 10, canvas.height - 10);
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Mulai animasi
+        animate();
+    </script>
+</body>
+</html>
